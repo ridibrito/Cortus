@@ -1,0 +1,491 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Organizações e Usuários
+model Org {
+  id          String   @id @default(uuid())
+  nome        String
+  dominio     String?  @unique
+  plano       String   @default("free") // free, pro, enterprise
+  logo_url    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  
+  users       User[]
+  leads       Lead[]
+  contatos    Contato[]
+  empresas    Empresa[]
+  negocios    Negocio[]
+  pipelines   Pipeline[]
+  campos_personalizados CampoPersonalizado[]
+  financeiros Financeiro[]
+  projetos    Projeto[]
+  comunicacoes Comunicacao[]
+  calendarios Calendario[]
+  automacoes  Automacao[]
+  tarefas      Tarefa[]
+
+  @@map("orgs")
+}
+
+model User {
+  id              String   @id @default(uuid())
+  org_id          String
+  nome            String
+  email           String   @unique
+  avatar_url      String?
+  ativo           Boolean  @default(true)
+  supabase_user_id String?  @unique
+  telefone        String?
+  bio             String?
+  pais            String?
+  cidade          String?
+  estado          String?
+  codigo_postal   String?
+  tax_id          String?
+  facebook_url    String?
+  twitter_url     String?
+  linkedin_url    String?
+  instagram_url   String?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  
+  org             Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  user_roles      UserRole[]
+  leads           Lead[]
+  contatos       Contato[]
+  empresas       Empresa[]
+  negocios        Negocio[]
+  projetos        Projeto[]
+  tarefas         Tarefa[]
+  calendarios     Calendario[]
+  calendario_participantes CalendarioParticipante[]
+
+  @@map("users")
+}
+
+// Sistema de Permissões
+model Role {
+  id          String   @id @default(uuid())
+  nome        String   // admin, comercial, financeiro, operacional
+  descricao   String?
+  org_id      String?  // null = role global
+  is_system   Boolean  @default(false)
+  
+  permissions RolePermission[]
+  user_roles  UserRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  modulo      String   // crm, financeiro, projetos
+  acao        String   // create, read, update, delete
+  descricao   String?
+  
+  role_permissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  role_id       String
+  permission_id String
+  
+  role          Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+  
+  @@id([role_id, permission_id])
+  @@map("roles_permissions")
+}
+
+model UserRole {
+  user_id String
+  role_id String
+  
+  user    User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  role    Role @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  
+  @@id([user_id, role_id])
+  @@map("user_roles")
+}
+
+// CRM (Contatos → Empresas → Negócios → Propostas → Contratos)
+
+// DEPRECATED: Lead será removido em versão futura, use Contato
+model Lead {
+  id            String   @id @default(uuid())
+  org_id        String
+  nome          String
+  email         String?
+  telefone      String?
+  origem        String   // facebook, google, indicacao
+  status        String   @default("novo") // novo, qualificado, desqualificado
+  responsavel_id String?
+  score         Int      @default(0) // IA Gemini calcula
+  observacoes   String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  responsavel   User?    @relation(fields: [responsavel_id], references: [id], onDelete: SetNull)
+
+  @@map("leads")
+}
+
+model Contato {
+  id            String   @id @default(uuid())
+  org_id        String
+  nome          String
+  email         String?
+  telefone      String?
+  cargo         String?
+  tipo          String   @default("pessoa") // pessoa, empresa
+  cpf           String?
+  razao_social  String?
+  nome_fantasia String?
+  empresa_id   String?
+  responsavel_id String?
+  avatar_url    String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  empresa       Empresa? @relation(fields: [empresa_id], references: [id], onDelete: SetNull)
+  responsavel   User?    @relation(fields: [responsavel_id], references: [id], onDelete: SetNull)
+  negocios      Negocio[]
+  tarefas       Tarefa[]
+  calendarios   Calendario[]
+  calendario_participantes CalendarioParticipante[]
+
+  @@map("contatos")
+}
+
+model Empresa {
+  id            String   @id @default(uuid())
+  org_id        String
+  nome_fantasia String
+  razao_social  String?
+  cnpj          String?  @unique
+  segmento      String?
+  site          String?
+  cidade        String?
+  tamanho       String?  // pequena, media, grande
+  responsavel_id String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  responsavel   User?    @relation(fields: [responsavel_id], references: [id], onDelete: SetNull)
+  contatos      Contato[]
+  negocios      Negocio[]
+  calendarios   Calendario[]
+
+  @@map("empresas")
+}
+
+// Pipelines e Etapas para Negócios
+model Pipeline {
+  id            String   @id @default(uuid())
+  org_id        String
+  nome          String
+  descricao     String?
+  ativo         Boolean  @default(true)
+  is_padrao     Boolean  @default(false) // Pipeline padrão da organização
+  ordem         Int      @default(0) // Ordem de exibição
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  etapas        Etapa[]
+  negocios      Negocio[]
+  campos_personalizados CampoPersonalizado[]
+
+  @@map("pipelines")
+}
+
+model Etapa {
+  id            String   @id @default(uuid())
+  pipeline_id   String
+  nome          String
+  descricao     String?
+  cor           String?  // Cor da etapa (hex)
+  ordem         Int      @default(0) // Ordem dentro do pipeline
+  probabilidade Int      @default(0) // Probabilidade padrão da etapa
+  is_final      Boolean  @default(false) // Se é etapa final (ganho/perdido)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  pipeline      Pipeline @relation(fields: [pipeline_id], references: [id], onDelete: Cascade)
+  negocios      Negocio[] @relation("NegocioEtapa")
+
+  @@map("etapas")
+}
+
+// Campos personalizados para negócios (futuro)
+model CampoPersonalizado {
+  id            String   @id @default(uuid())
+  org_id        String
+  pipeline_id   String?  // null = campo global para todos os pipelines
+  nome          String
+  tipo          String   // text, number, date, select, boolean
+  opcoes        Json?    // Para tipo select
+  obrigatorio   Boolean  @default(false)
+  ordem         Int      @default(0)
+  ativo         Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  pipeline      Pipeline? @relation(fields: [pipeline_id], references: [id], onDelete: Cascade)
+
+  @@unique([org_id, pipeline_id, nome]) // Nome único por pipeline/org
+  @@map("campos_personalizados")
+}
+
+model Negocio {
+  id            String   @id @default(uuid())
+  org_id        String
+  pipeline_id   String?  // Pipeline customizado (null = pipeline padrão)
+  etapa_id      String?  // Etapa customizada (null = etapa padrão)
+  contato_id    String   // OBRIGATÓRIO
+  empresa_id    String?
+  valor         Decimal  @db.Decimal(10, 2)
+  etapa         String   @default("prospecting") // DEPRECATED: usar etapa_id
+  status        String   @default("aberto") // aberto, ganho, perdido
+  responsavel_id String?
+  probabilidade Int      @default(0)
+  observacoes   String?
+  campos_personalizados Json? // Campos personalizados em formato JSON
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  pipeline      Pipeline? @relation(fields: [pipeline_id], references: [id], onDelete: Cascade)
+  etapa_rel     Etapa?   @relation("NegocioEtapa", fields: [etapa_id], references: [id], onDelete: SetNull)
+  contato       Contato  @relation(fields: [contato_id], references: [id], onDelete: Cascade)
+  empresa       Empresa? @relation(fields: [empresa_id], references: [id], onDelete: SetNull)
+  responsavel   User?    @relation(fields: [responsavel_id], references: [id], onDelete: SetNull)
+  propostas     Proposta[]
+  contratos     Contrato[]
+  calendarios   Calendario[]
+
+  @@map("negocios")
+}
+
+model Proposta {
+  id            String   @id @default(uuid())
+  negocio_id    String
+  modelo_id     String?  // template de proposta
+  valor         Decimal  @db.Decimal(10, 2)
+  status        String   @default("rascunho") // rascunho, enviada, aceita, rejeitada
+  validade      DateTime?
+  conteudo      String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  negocio       Negocio  @relation(fields: [negocio_id], references: [id], onDelete: Cascade)
+  contratos    Contrato[]
+
+  @@map("propostas")
+}
+
+model Contrato {
+  id              String   @id @default(uuid())
+  negocio_id      String
+  proposta_id     String?
+  cliente_id      String
+  valor            Decimal  @db.Decimal(10, 2)
+  data_assinatura  DateTime?
+  status           String   @default("rascunho") // rascunho, pendente, assinado, cancelado
+  clicksign_id     String?  @unique // ID do Clicksign
+  documento_url    String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+  
+  negocio          Negocio  @relation(fields: [negocio_id], references: [id], onDelete: Cascade)
+  proposta         Proposta? @relation(fields: [proposta_id], references: [id], onDelete: SetNull)
+  financeiros      Financeiro[]
+  projetos         Projeto[]
+
+  @@map("contratos")
+}
+
+// Financeiro
+model Financeiro {
+  id            String   @id @default(uuid())
+  org_id        String
+  contrato_id   String?
+  tipo          String   // receber, pagar
+  categoria     String
+  valor         Decimal  @db.Decimal(10, 2)
+  data          DateTime
+  data_vencimento DateTime?
+  status        String   @default("pendente") // pendente, pago, vencido
+  descricao     String?
+  asaas_id      String?  @unique // ID do Asaas
+  inter_id      String?  @unique // ID do Inter
+  paghiper_id   String?  @unique // ID do PagHiper
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  contrato      Contrato? @relation(fields: [contrato_id], references: [id], onDelete: SetNull)
+
+  @@map("financeiro")
+}
+
+// Projetos e Tarefas
+model Projeto {
+  id            String   @id @default(uuid())
+  org_id        String
+  contrato_id   String?
+  nome          String
+  descricao     String?
+  status        String   @default("planejamento") // planejamento, em_andamento, concluido
+  inicio        DateTime?
+  fim           DateTime?
+  responsavel_id String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  contrato      Contrato? @relation(fields: [contrato_id], references: [id], onDelete: SetNull)
+  responsavel   User?    @relation(fields: [responsavel_id], references: [id], onDelete: SetNull)
+  tarefas       Tarefa[]
+  calendarios   Calendario[]
+
+  @@map("projetos")
+}
+
+model Tarefa {
+  id            String   @id @default(uuid())
+  org_id        String
+  projeto_id    String?
+  contato_id    String?
+  titulo        String
+  descricao     String?
+  responsavel_id String?
+  prioridade    String   @default("media") // baixa, media, alta
+  status        String   @default("pendente") // pendente, em_andamento, concluida
+  prazo         DateTime?
+  concluida_em  DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  projeto       Projeto? @relation(fields: [projeto_id], references: [id], onDelete: Cascade)
+  contato       Contato? @relation(fields: [contato_id], references: [id], onDelete: SetNull)
+  responsavel   User?    @relation(fields: [responsavel_id], references: [id], onDelete: SetNull)
+
+  @@map("tarefas")
+}
+
+// Comunicação
+model Comunicacao {
+  id            String   @id @default(uuid())
+  org_id        String
+  tipo          String   // email, whatsapp, chat
+  origem_id     String?  // lead_id, negocio_id, etc
+  origem_tipo   String?  // lead, negocio, projeto
+  destino       String   // email ou telefone
+  canal         String   // email, whatsapp, chat_interno
+  assunto       String?
+  conteudo      String
+  data_envio    DateTime @default(now())
+  status        String   @default("enviado") // enviado, falhou, pendente
+  metadata      Json?
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@map("comunicacoes")
+}
+
+// Calendário
+model Calendario {
+  id                String   @id @default(uuid())
+  org_id            String
+  usuario_id        String
+  titulo            String
+  descricao         String?
+  data_inicio       DateTime
+  data_fim          DateTime
+  evento_externo_id String?  // Google Calendar ID
+  tipo              String   @default("reuniao") // reuniao, lembrete, evento, tarefa
+  localizacao       String?
+  
+  // Relacionamentos com entidades do CRM
+  contato_id        String?
+  empresa_id        String?
+  negocio_id        String?
+  projeto_id        String?
+  
+  // Campos para solicitação de reunião
+  status            String   @default("agendada") // agendada, pendente_confirmacao, confirmada, recusada, cancelada
+  link_confirmacao  String?  @unique // Link único para confirmação
+  solicitada_em     DateTime? // Data da solicitação
+  
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  
+  org               Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  usuario           User     @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+  contato           Contato? @relation(fields: [contato_id], references: [id], onDelete: SetNull)
+  empresa           Empresa? @relation(fields: [empresa_id], references: [id], onDelete: SetNull)
+  negocio           Negocio? @relation(fields: [negocio_id], references: [id], onDelete: SetNull)
+  projeto           Projeto? @relation(fields: [projeto_id], references: [id], onDelete: SetNull)
+  
+  participantes    CalendarioParticipante[]
+
+  @@map("calendario")
+}
+
+// Participantes de Reuniões
+model CalendarioParticipante {
+  id            String   @id @default(uuid())
+  calendario_id String
+  tipo          String   // usuario, contato
+  usuario_id    String?  // Se tipo = usuario
+  contato_id    String?  // Se tipo = contato
+  email         String?  // Para participantes externos sem contato
+  nome          String?  // Para participantes externos sem contato
+  status        String   @default("pendente") // pendente, confirmado, recusado
+  confirmado_em DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  calendario    Calendario @relation(fields: [calendario_id], references: [id], onDelete: Cascade)
+  usuario       User?      @relation(fields: [usuario_id], references: [id], onDelete: SetNull)
+  contato       Contato?   @relation(fields: [contato_id], references: [id], onDelete: SetNull)
+  
+  @@map("calendario_participantes")
+}
+
+// Automações
+model Automacao {
+  id            String   @id @default(uuid())
+  org_id        String
+  nome          String
+  descricao     String?
+  trigger       String   // evento que dispara
+  condicoes     Json?    // condições em JSON
+  acoes         Json     // ações em JSON
+  ativo         Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  org           Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@map("automacoes")
+}
+

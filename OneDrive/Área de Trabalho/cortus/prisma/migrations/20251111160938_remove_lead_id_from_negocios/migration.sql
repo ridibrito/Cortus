@@ -1,0 +1,1 @@
+ALTER TABLE negocios DROP COLUMN IF EXISTS lead_id;
